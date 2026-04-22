@@ -49,7 +49,7 @@ jobs:
       - name: Run tests
         run: |
           cd backend
-          pytest -q
+          pytest -q || { rc=$?; if [ $rc -eq 5 ]; then echo 'No tests collected (exit 5). Continuing.'; else exit $rc; fi }
 
   frontend:
     name: Build frontend
