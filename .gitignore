@@ -1,0 +1,26 @@
+__pycache__/
+*.pyc
+.env
+.env.*
+venv/
+.venv/
+node_modules/
+.DS_Store
+
+# Python
+.pytest_cache/
+coverage/
+*.egg-info/
+dist/
+
+# Django
+media/
+staticfiles/
+
+# IDEs
+.idea/
+.vscode/
+
+# Frontend
+frontend/dist/
+frontend/.vite/
