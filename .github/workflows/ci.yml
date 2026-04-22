@@ -85,6 +85,8 @@ jobs:
     permissions:
       contents: write
       packages: write
+    env:
+      REPO_LOWER: ${{ toLower(github.repository) }}
     steps:
       - uses: actions/checkout@v4
       - name: Log in to GitHub Container Registry
@@ -100,5 +102,5 @@ jobs:
           file: backend/Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ toLower(github.repository) }}:backend-${{ github.sha }}
-            ghcr.io/${{ toLower(github.repository) }}:backend-latest
+            ghcr.io/${{ env.REPO_LOWER }}:backend-${{ github.sha }}
+            ghcr.io/${{ env.REPO_LOWER }}:backend-latest

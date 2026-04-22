@@ -45,6 +45,12 @@ class User(AbstractBaseUser, PermissionsMixin):
         # Normalize empty phone to None so unique constraint allows multiple blanks
         if not self.phone:
             self.phone = None
+        # Ensure email is stored normalized (lowercase, trimmed)
+        if self.email:
+            try:
+                self.email = self.__class__.objects.normalize_email(self.email).strip().lower()
+            except Exception:
+                self.email = (self.email or "").strip().lower()
         super().save(*args, **kwargs)
 
     def has_role(self, role_name):
