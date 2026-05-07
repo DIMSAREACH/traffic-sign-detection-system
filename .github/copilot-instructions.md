@@ -6,7 +6,7 @@
 - **Theme**: Purple (`#7c3aed`), dark mode support
 - **i18n**: English + Khmer (Battambang font), files in `frontend/src/i18n/`
 - **Auth**: JWT (SimpleJWT) + Google OAuth
-- **Venv**: `.venv/` at project root
+- **Venv**: `backend/.venv/` (lives inside the backend folder)
 
 ## Key Conventions
 - Purple constants: `PU = "#7c3aed"`, `PA = (a) => \`rgba(124,58,237,${a})\``
@@ -24,6 +24,7 @@
 - `frontend/src/i18n/` — LanguageContext, en.js, km.js
 - `frontend/src/services/` — API service modules
 - `frontend/src/styles/global.css` — Global styles, font rules, accessibility CSS
+- `backend/.venv/` — Python virtual environment
 - `.vscode/tasks.json` — Tasks to run backend, frontend, or both
 
 ## Development

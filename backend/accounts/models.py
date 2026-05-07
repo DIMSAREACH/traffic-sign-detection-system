@@ -1,5 +1,9 @@
+import uuid
+from datetime import timedelta
+
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
+from django.utils import timezone
 
 
 class UserManager(BaseUserManager):
@@ -29,9 +33,26 @@ class User(AbstractBaseUser, PermissionsMixin):
     last_name = models.CharField(max_length=150, blank=True)
     phone = models.CharField(max_length=50, blank=True, null=True, unique=True)
     avatar = models.ImageField(upload_to="avatars/", null=True, blank=True)
+    # Security / account state
+    email_verified = models.BooleanField(default=False)
+    failed_login_count = models.PositiveIntegerField(default=0)
+    locked_until = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     date_joined = models.DateTimeField(auto_now_add=True)
+    # Recovery (backup) email — must be verified before use
+    backup_email          = models.EmailField(null=True, blank=True)
+    backup_email_verified = models.BooleanField(default=False)
+    allow_backup_password_reset = models.BooleanField(default=True)
+    # Email visibility & password-reset policy (user-controlled via profile)
+    keep_email_private = models.BooleanField(
+        default=True,
+        help_text="When True, mask this user's emails for other non-admin API consumers.",
+    )
+    block_unverified_email_reset = models.BooleanField(
+        default=False,
+        help_text="When True, password-reset OTP to the primary email requires email_verified.",
+    )
 
     objects = UserManager()
 
@@ -58,6 +79,16 @@ class User(AbstractBaseUser, PermissionsMixin):
         if role == "admin" and (self.is_staff or self.is_superuser):
             return True
         return self.user_roles.filter(role__name=role).exists()
+
+    def is_locked(self):
+        from django.utils import timezone
+        return bool(self.locked_until and self.locked_until > timezone.now())
+
+    def clear_lockout(self, save=False):
+        self.failed_login_count = 0
+        self.locked_until = None
+        if save:
+            self.save(update_fields=["failed_login_count", "locked_until"])
 
 
 class Role(models.Model):
@@ -113,3 +144,37 @@ class Officer(models.Model):
 
     def __str__(self):
         return f"Officer {self.user.email}"
+
+
+class OTPVerification(models.Model):
+    OTP_TYPE_CHOICES = [
+        ("PASSWORD_RESET", "Password Reset"),
+        ("LOGIN_2FA",      "Login 2FA"),
+        ("EMAIL_VERIFY",   "Email Verify"),
+    ]
+
+    otp_id     = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user       = models.ForeignKey(User, on_delete=models.CASCADE, related_name="otps")
+    otp_code   = models.CharField(max_length=6)
+    otp_type   = models.CharField(max_length=20, choices=OTP_TYPE_CHOICES)
+    is_used    = models.BooleanField(default=False)
+    attempts   = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"OTP({self.otp_type}) for {self.user.email}"
+
+    def is_expired(self):
+        return timezone.now() > self.expires_at
+
+    def is_valid(self):
+        return not self.is_used and not self.is_expired() and self.attempts < 5
+
+    def mark_used(self):
+        self.is_used = True
+        self.save(update_fields=["is_used"])

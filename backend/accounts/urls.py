@@ -4,6 +4,10 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
     AvatarUploadView,
+    BackupEmailConfirmView,
+    BackupEmailRequestView,
+    ChangeEmailConfirmView,
+    ChangeEmailRequestView,
     ChangePasswordView,
     DeleteAccountView,
     FacebookSocialAuthView,
@@ -11,7 +15,10 @@ from .views import (
     GoogleSocialAuthView,
     LoginView,
     MicrosoftSocialAuthView,
+    OTPRequestView,
+    OTPVerifyView,
     PasswordResetConfirmView,
+    PasswordResetOTPView,
     PasswordResetRequestView,
     ProfileView,
     RegisterView,
@@ -28,9 +35,18 @@ urlpatterns = [
     path("profile/",                ProfileView.as_view(),              name="profile"),
     path("avatar/",                 AvatarUploadView.as_view(),         name="avatar-upload"),
     path("change-password/",        ChangePasswordView.as_view(),       name="change-password"),
+    path("change-email/request/",  ChangeEmailRequestView.as_view(),    name="change-email-request"),
+    path("change-email/confirm/",  ChangeEmailConfirmView.as_view(),    name="change-email-confirm"),
     path("delete-account/",          DeleteAccountView.as_view(),         name="delete-account"),
     path("password-reset/request/", PasswordResetRequestView.as_view(), name="password-reset-request"),
     path("password-reset/confirm/", PasswordResetConfirmView.as_view(), name="password-reset-confirm"),
+    # OTP Password-Reset (3-step flow)
+    path("otp/request/",        OTPRequestView.as_view(),       name="otp-request"),
+    path("otp/verify/",         OTPVerifyView.as_view(),        name="otp-verify"),
+    path("otp/reset-password/", PasswordResetOTPView.as_view(), name="otp-reset-password"),
+    # Backup / recovery email management
+    path("backup-email/",         BackupEmailRequestView.as_view(), name="backup-email"),
+    path("backup-email/confirm/", BackupEmailConfirmView.as_view(), name="backup-email-confirm"),
     # Social OAuth
     path("social/google/",          GoogleSocialAuthView.as_view(),     name="social-google"),
     path("social/github/",          GitHubSocialAuthView.as_view(),     name="social-github"),

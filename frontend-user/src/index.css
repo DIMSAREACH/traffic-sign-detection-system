@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ds-primary-900: #0b2a5b;
+  --ds-primary-800: #123b7a;
+  --ds-primary-700: #1b4aa0;
+
+  --ds-bg: #f7f9ff;
+  --ds-surface: rgba(255, 255, 255, 0.72);
+  --ds-surface-strong: rgba(255, 255, 255, 0.92);
+  --ds-border: rgba(16, 24, 40, 0.10);
+  --ds-text: #0b1220;
+  --ds-muted: rgba(11, 18, 32, 0.72);
+
+  --ds-success: #22c55e;
+  --ds-warning: #f59e0b;
+  --ds-danger: #ef4444;
+
+  --ds-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+  --ds-shadow-lift: 0 12px 34px rgba(0, 0, 0, 0.18);
+}
+
+html[data-theme="dark"] {
+  --ds-bg: #0b1220;
+  --ds-surface: rgba(15, 27, 46, 0.58);
+  --ds-surface-strong: rgba(15, 27, 46, 0.88);
+  --ds-border: rgba(247, 250, 255, 0.10);
+  --ds-text: #f7faff;
+  --ds-muted: rgba(182, 194, 217, 0.86);
+
+  --ds-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  --ds-shadow-lift: 0 12px 34px rgba(0, 0, 0, 0.34);
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background: var(--ds-bg);
+    color: var(--ds-text);
+  }
+}
+
+@layer components {
+  .glass {
+    background: var(--ds-surface);
+    border: 1px solid var(--ds-border);
+    box-shadow: var(--ds-shadow);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+
+  .glass-strong {
+    background: var(--ds-surface-strong);
+    border: 1px solid var(--ds-border);
+    box-shadow: var(--ds-shadow);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+}
+

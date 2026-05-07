@@ -10,6 +10,10 @@ from .models import Fine, Payment, TrafficViolation
 from .serializers import FineSerializer, PaymentSerializer, TrafficViolationDetailSerializer, TrafficViolationSerializer
 
 
+def _is_admin_or_officer(user):
+    return user and user.is_authenticated and (user.has_role("admin") or user.has_role("officer"))
+
+
 class TrafficViolationViewSet(viewsets.ModelViewSet):
     queryset = TrafficViolation.objects.select_related(
         "vehicle", "driver__user", "camera", "sign"
@@ -24,6 +28,17 @@ class TrafficViolationViewSet(viewsets.ModelViewSet):
         if self.action == "retrieve":
             return TrafficViolationDetailSerializer
         return TrafficViolationSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        # Drivers must only see their own records. Officers/Admins can see all.
+        if _is_admin_or_officer(user):
+            return qs
+        driver = getattr(user, "driver_profile", None)
+        if driver:
+            return qs.filter(driver=driver)
+        return qs.none()
 
     @action(detail=True, methods=["put"], url_path="status",
             permission_classes=[IsAuthenticated, IsAdminRole])
@@ -75,8 +90,18 @@ class FineViewSet(viewsets.ModelViewSet):
             return FineDetailSerializer
         return FineSerializer
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if _is_admin_or_officer(user):
+            return qs
+        driver = getattr(user, "driver_profile", None)
+        if driver:
+            return qs.filter(violation__driver=driver)
+        return qs.none()
+
     @action(detail=True, methods=["post"], url_path="pay",
-            permission_classes=[IsAuthenticated, IsAdminRole])
+            permission_classes=[IsAuthenticated])
     def pay(self, request, pk=None):
         """Mark a fine as paid with today's date."""
         fine = self.get_object()
@@ -90,7 +115,7 @@ class FineViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"], url_path="summary")
     def summary(self, request):
         """Return DB-wide aggregate stats for all fines."""
-        qs = Fine.objects.all()
+        qs = self.get_queryset()
         today = timezone.now().date()
         agg = qs.aggregate(
             total_amount=Sum("amount"),
@@ -135,6 +160,16 @@ class PaymentViewSet(viewsets.ModelViewSet):
         if payment.status == "completed":
             self._mark_fine_paid(payment.violation)
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if _is_admin_or_officer(user):
+            return qs
+        driver = getattr(user, "driver_profile", None)
+        if driver:
+            return qs.filter(violation__driver=driver)
+        return qs.none()
+
     @staticmethod
     def _mark_fine_paid(violation):
         try:
@@ -149,7 +184,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"], url_path="summary")
     def summary(self, request):
         """Aggregated payment statistics."""
-        qs = Payment.objects.all()
+        qs = self.get_queryset()
         total = qs.aggregate(total=Sum("amount"))["total"] or 0
         completed = qs.filter(status="completed").aggregate(total=Sum("amount"))["total"] or 0
         pending_amt = qs.filter(status="pending").aggregate(total=Sum("amount"))["total"] or 0

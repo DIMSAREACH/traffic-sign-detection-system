@@ -32,7 +32,7 @@ An AI-powered traffic violation management platform built with **Django 5** (RES
 | Frontend | React 18, Vite 5, Bootstrap 5    |
 | Charts   | Chart.js + react-chartjs-2       |
 | Auth     | JWT (SimpleJWT), Google OAuth     |
-| Database | SQLite (dev) / PostgreSQL (prod)  |
+| Database | PostgreSQL                        |
 
 ## Getting Started
 
@@ -45,10 +45,11 @@ An AI-powered traffic violation management platform built with **Django 5** (RES
 
 ```bash
 cd backend
-python -m venv ../.venv
-../.venv/Scripts/activate   # Windows
+python -m venv .venv
+.venv\Scripts\Activate.ps1   # Windows PowerShell
+# source .venv/bin/activate  # macOS / Linux
 pip install -r requirements.txt
-cp .env.example .env        # edit values
+cp .env.example .env          # edit DB credentials and secret key
 python manage.py migrate
 python manage.py runserver
 ```
@@ -56,10 +57,19 @@ python manage.py runserver
 ### Frontend
 
 ```bash
-cd frontend
+cd frontend-user
 npm install
-cp .env.example .env        # set VITE_API_URL=http://localhost:8000
-npm run dev
+cp .env.example .env        # adjust OAuth client IDs if needed
+npm run dev                 # starts user portal on :5173
+```
+
+### Admin Frontend
+
+```bash
+cd frontend-admin
+npm install
+cp .env.example .env        # adjust OAuth client IDs if needed
+npm run dev                 # starts admin portal on :5174
 ```
 
 ### VS Code Tasks

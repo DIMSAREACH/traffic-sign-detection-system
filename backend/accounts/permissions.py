@@ -33,3 +33,9 @@ class AdminWriteOnly(BasePermission):
         if request.method in SAFE_METHODS:
             return True
         return request.user.has_role("admin")
+
+
+class IsOfficerOrAdminRole(BasePermission):
+    """Allow access to officers and admins."""
+    def has_permission(self, request, view):
+        return request.user.is_authenticated and (request.user.has_role("officer") or request.user.has_role("admin"))

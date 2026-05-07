@@ -49,7 +49,7 @@ ROOT_URLCONF = "traffic_system.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -98,11 +98,35 @@ AUTHENTICATION_BACKENDS = [
     "accounts.backends.EmailBackend",
 ]
 
+# ── Email (Gmail SMTP + transactional templates) ───────────────────────────
+# See traffic_system/settings_email.py for setup steps and env vars.
+from traffic_system.settings_email import (  # noqa: E402
+    DEFAULT_FROM_EMAIL,
+    EMAIL_BACKEND,
+    EMAIL_HOST,
+    EMAIL_HOST_PASSWORD,
+    EMAIL_HOST_USER,
+    EMAIL_PORT,
+    EMAIL_PROVIDER,
+    EMAIL_SUBJECT_PREFIX,
+    EMAIL_TIMEOUT,
+    EMAIL_USE_SSL,
+    EMAIL_USE_TLS,
+    RESEND_API_KEY,
+    RESEND_FROM,
+    SUPPORT_CONTACT_EMAIL,
+    PUBLIC_APP_URL,
+    PASSWORD_RESET_LINK_TTL_MINUTES,
+)
+
 CORS_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
     if origin.strip()
 ]
+
+# Required for axios `withCredentials: true` (refresh cookie / auth flows).
+CORS_ALLOW_CREDENTIALS = True
 
 # In development, always allow the Vite dev server origins
 if DEBUG:
@@ -133,11 +157,30 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
     ],
+    # Anonymous throttle applies to token refresh + any request before JWT validates.
+    # ~2 anon hits per full reload when access is expired; 30/min breaks rapid refreshes.
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "30/minute",
+        "anon": os.getenv(
+            "THROTTLE_ANON_PER_MIN",
+            "400/minute" if DEBUG else "120/minute",
+        ),
         "user": "120/minute",
     },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+# ── Cache (used for OTP throttling / rate limit) ───────────────────────────────
+# Default is in-memory cache (ok for dev). For production, set REDIS_URL and use
+# a Redis cache backend.
+CACHES = {
+    "default": {
+        "BACKEND": os.getenv(
+            "DJANGO_CACHE_BACKEND",
+            "django.core.cache.backends.locmem.LocMemCache",
+        ),
+        "LOCATION": os.getenv("DJANGO_CACHE_LOCATION", "traffic-system-cache"),
+        "TIMEOUT": None,
+    }
 }
 
 SPECTACULAR_SETTINGS = {

@@ -24,6 +24,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.permissions import IsOfficerOrAdminRole
 from cameras.models import Camera
 from notifications.models import Notification
 from violations.models import Fine, TrafficViolation
@@ -45,7 +46,7 @@ def _date_qs(request, qs):
 
 
 class DashboardReportView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsOfficerOrAdminRole]
 
     def get(self, request):
         qs = _date_qs(request, TrafficViolation.objects.all())
@@ -146,7 +147,7 @@ class DashboardReportView(APIView):
 
 
 class MonthlyReportView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsOfficerOrAdminRole]
 
     def get(self, request):
         qs = _date_qs(request, TrafficViolation.objects.all())
@@ -206,7 +207,7 @@ class MyDashboardView(APIView):
 
 class SystemHealthView(APIView):
     """Return live health status for dashboard system-status widget."""
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsOfficerOrAdminRole]
 
     def get(self, request):
         services = {}
@@ -243,7 +244,7 @@ class SystemHealthView(APIView):
 
 
 class CSVExportView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsOfficerOrAdminRole]
 
     def get(self, request):
         qs = _date_qs(request, TrafficViolation.objects.select_related("vehicle", "camera").order_by("-date"))
@@ -299,7 +300,7 @@ _STATUS_COLORS = {
 
 class PDFExportView(APIView):
     """Generate a styled PDF report of violations."""
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsOfficerOrAdminRole]
 
     # ── helpers ──────────────────────────────────────────────
     @staticmethod

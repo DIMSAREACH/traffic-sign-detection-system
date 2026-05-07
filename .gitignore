@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 .env
 .env.*
+!.env.example
 venv/
 .venv/
 node_modules/
@@ -22,5 +23,8 @@ staticfiles/
 .vscode/
 
 # Frontend
-frontend/dist/
-frontend/.vite/
+frontend-admin/dist/
+frontend-admin/.vite/
+frontend-user/dist/
+frontend-user/.vite/
+*.log

@@ -1,10 +1,14 @@
 import random
 import re
+import secrets
 import time
+from datetime import timedelta
 
 import requests as http_requests
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
+from django.utils import timezone
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 from rest_framework import generics, permissions, status, viewsets
@@ -33,15 +37,110 @@ def validate_strong_password(password):
 _reset_codes: dict = {}
 _RESET_TTL = 300  # 5 minutes
 
-from .models import Driver, Officer, Role, UserRole
+# In-memory email change store: user_id -> (new_email, code, expiry_timestamp)
+_email_change_codes: dict = {}
+_EMAIL_CHANGE_TTL = 600  # 10 minutes
+
+_OTP_COOLDOWN_SEC = 60          # minimum seconds between sends (per key)
+_OTP_WINDOW_SEC = 15 * 60       # rolling window (per key)
+_OTP_MAX_PER_WINDOW = 5         # max sends per window (per key)
+
+# Additional IP-based protection to stop "many emails" spam from one client.
+_OTP_IP_COOLDOWN_SEC = 15       # minimum seconds between sends (per IP)
+_OTP_IP_WINDOW_SEC = 15 * 60    # rolling window (per IP)
+_OTP_IP_MAX_PER_WINDOW = 15     # max sends per window (per IP)
+
+
+def _client_ip(request):
+    xff = (request.META.get("HTTP_X_FORWARDED_FOR") or "").split(",")[0].strip()
+    return xff or (request.META.get("REMOTE_ADDR") or "unknown")
+
+
+def _cache_throttle(prefix: str, key: str, cooldown: int, window: int, max_per_window: int):
+    """
+    Cache-backed throttle. Returns (ok: bool, retry_after_sec: int).
+    """
+    now = int(time.time())
+    base = f"otp_rl:{prefix}:{key}"
+    last_k = f"{base}:last"
+    win_k = f"{base}:win"
+    cnt_k = f"{base}:cnt"
+
+    last = cache.get(last_k)
+    if last is not None:
+        delta = now - int(last)
+        if delta < cooldown:
+            return False, int(cooldown - delta)
+
+    win_start = cache.get(win_k)
+    if win_start is None or (now - int(win_start)) > window:
+        cache.set(win_k, now, timeout=window + 5)
+        cache.set(cnt_k, 0, timeout=window + 5)
+        win_start = now
+
+    count = cache.get(cnt_k) or 0
+    if int(count) >= int(max_per_window):
+        retry = int(window - (now - int(win_start)))
+        return False, max(retry, cooldown)
+
+    cache.set(last_k, now, timeout=window + 5)
+    try:
+        cache.incr(cnt_k)
+    except Exception:
+        cache.set(cnt_k, int(count) + 1, timeout=window + 5)
+    return True, 0
+
+
+def _otp_throttle_request(request, key: str):
+    # per target (email/user)
+    ok, retry = _cache_throttle("target", key, _OTP_COOLDOWN_SEC, _OTP_WINDOW_SEC, _OTP_MAX_PER_WINDOW)
+    if not ok:
+        return False, retry
+    # per IP (global for OTP endpoints)
+    ip = _client_ip(request)
+    ok, retry = _cache_throttle("ip", ip, _OTP_IP_COOLDOWN_SEC, _OTP_IP_WINDOW_SEC, _OTP_IP_MAX_PER_WINDOW)
+    if not ok:
+        return False, retry
+    return True, 0
+
+
+def _password_reset_link_rate_ok(user_pk: int, max_per_hour: int = 3) -> tuple[bool, int]:
+    """Limit magic-link emails per user per rolling hour. Returns (ok, retry_after_sec)."""
+    key = f"pwd_reset_link_hr:{user_pk}"
+    now = time.time()
+    window = 3600.0
+    times = cache.get(key) or []
+    times = [t for t in times if now - t < window]
+    if len(times) >= max_per_hour:
+        return False, max(1, int(window - (now - times[0])))
+    times.append(now)
+    cache.set(key, times, int(window) + 120)
+    return True, 0
+
+
+from .models import Driver, Officer, OTPVerification, Role, UserRole
 from .permissions import AdminDeleteOnly, AdminWriteOnly, IsAdminRole
 from .serializers import (
+    BackupEmailConfirmSerializer,
+    BackupEmailRequestSerializer,
     DriverSerializer,
     LoginSerializer,
     OfficerSerializer,
+    OTPRequestSerializer,
+    OTPVerifySerializer,
+    PasswordResetSerializer,
     ProfileUpdateSerializer,
     RegisterSerializer,
     UserSerializer,
+)
+from utils.email_service import EmailService
+from utils.otp import (
+    delete_reset_token,
+    generate_otp_code,
+    get_client_ip,
+    get_reset_token_user,
+    mask_email,
+    store_reset_token,
 )
 
 
@@ -128,13 +227,21 @@ User = get_user_model()
 
 
 class PasswordResetRequestView(APIView):
-    """POST { email } — generates a 6-digit OTP (returned in response for demo)."""
+    """POST { email } — generates a 6-digit OTP and emails it."""
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
         email = (request.data.get("email") or "").strip().lower()
         if not email:
             return Response({"detail": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        ok, retry = _otp_throttle_request(request, f"pw:{email}")
+        if not ok:
+            return Response(
+                {"detail": f"Too many OTP requests. Please wait {retry}s and try again."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(retry)},
+            )
 
         try:
             User.objects.get(email=email)
@@ -145,10 +252,23 @@ class PasswordResetRequestView(APIView):
         otp = f"{random.randint(0, 999999):06d}"
         _reset_codes[email] = (otp, time.time() + _RESET_TTL)
 
-        return Response({
-            "detail": "OTP generated.",
-            "otp": otp,          # demo only – remove in production and send via email
-        })
+        sent, send_err = EmailService.send_otp_email(
+            user=User(email=email, username=""),
+            otp_code=otp,
+            masked_email=mask_email(email),
+            expires_minutes=5.0,
+            to_email=email,
+            validity_label="5 minutes",
+        )
+        if not sent:
+            detail = (
+                f"Failed to send OTP email: {send_err}"
+                if settings.DEBUG and send_err
+                else "Failed to send OTP email. Please try again later."
+            )
+            return Response({"detail": detail}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({"detail": "OTP sent to your email."})
 
 
 class PasswordResetConfirmView(APIView):
@@ -192,6 +312,82 @@ class PasswordResetConfirmView(APIView):
         _reset_codes.pop(email, None)
 
         return Response({"detail": "Password reset successful. You can now sign in."})
+
+
+# ── Change-email endpoints (verified OTP; demo OTP returned) ──────────────────
+
+class ChangeEmailRequestView(APIView):
+    """POST { new_email } — generates a 6-digit OTP for changing the current user's email."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        new_email = (request.data.get("new_email") or "").strip().lower()
+        if not new_email:
+            return Response({"detail": "new_email is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if User.objects.filter(email__iexact=new_email).exclude(pk=request.user.pk).exists():
+            return Response({"detail": "That email is already in use."}, status=status.HTTP_400_BAD_REQUEST)
+
+        ok, retry = _otp_throttle_request(request, f"email:{request.user.pk}")
+        if not ok:
+            return Response(
+                {"detail": f"Too many OTP requests. Please wait {retry}s and try again."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(retry)},
+            )
+
+        otp = f"{random.randint(0, 999999):06d}"
+        _email_change_codes[request.user.pk] = (new_email, otp, time.time() + _EMAIL_CHANGE_TTL)
+        sent, send_err = EmailService.send_otp_email(
+            user=request.user,
+            otp_code=otp,
+            masked_email=mask_email(new_email),
+            expires_minutes=10.0,
+            to_email=new_email,
+            validity_label="10 minutes",
+        )
+        if not sent:
+            detail = (
+                f"Failed to send OTP email: {send_err}"
+                if settings.DEBUG and send_err
+                else "Failed to send OTP email. Please try again later."
+            )
+            return Response({"detail": detail}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({"detail": "OTP sent to your new email."})
+
+
+class ChangeEmailConfirmView(APIView):
+    """POST { otp } — validates OTP and updates the current user's email."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        otp = (request.data.get("otp") or "").strip()
+        if not otp:
+            return Response({"detail": "otp is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        entry = _email_change_codes.get(request.user.pk)
+        if not entry:
+            return Response({"detail": "No email change was requested."}, status=status.HTTP_400_BAD_REQUEST)
+
+        new_email, stored_otp, expiry = entry
+        if time.time() > expiry:
+            _email_change_codes.pop(request.user.pk, None)
+            return Response({"detail": "OTP has expired. Please request a new one."}, status=status.HTTP_400_BAD_REQUEST)
+        if otp != stored_otp:
+            return Response({"detail": "Incorrect OTP."}, status=status.HTTP_400_BAD_REQUEST)
+        if User.objects.filter(email__iexact=new_email).exclude(pk=request.user.pk).exists():
+            return Response({"detail": "That email is already in use."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user
+        user.email = new_email
+        # Require re-verification of the new email (if you later enforce it)
+        try:
+            user.email_verified = False
+        except Exception:
+            pass
+        user.save(update_fields=["email", "email_verified"] if hasattr(user, "email_verified") else ["email"])
+        _email_change_codes.pop(request.user.pk, None)
+        return Response(UserSerializer(user, context={"request": request}).data)
 
 
 # ── Social OAuth helpers ────────────────────────────────────────────────
@@ -247,6 +443,11 @@ class GoogleSocialAuthView(APIView):
         access_token = request.data.get("access_token")
 
         if credential:
+            if not getattr(settings, "GOOGLE_CLIENT_ID", ""):
+                return Response(
+                    {"detail": "Google login is not configured on the server."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             # Verify Google ID token (JWT credential from GoogleLogin component)
             try:
                 idinfo = id_token.verify_oauth2_token(
@@ -290,6 +491,8 @@ class GitHubSocialAuthView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
+        if not getattr(settings, "GITHUB_CLIENT_ID", "") or not getattr(settings, "GITHUB_CLIENT_SECRET", ""):
+            return Response({"detail": "GitHub login is not configured on the server."}, status=status.HTTP_400_BAD_REQUEST)
         code         = request.data.get("code")
         redirect_uri = request.data.get("redirect_uri", "")
         if not code:
@@ -307,9 +510,24 @@ class GitHubSocialAuthView(APIView):
             headers={"Accept": "application/json"},
             timeout=10,
         )
-        access_token = token_resp.json().get("access_token")
+        try:
+            token_json = token_resp.json()
+        except Exception:
+            token_json = {}
+
+        access_token = (token_json or {}).get("access_token")
         if not access_token:
-            return Response({"detail": "Failed to exchange GitHub code."}, status=status.HTTP_400_BAD_REQUEST)
+            provider_err = (token_json or {}).get("error") or ""
+            provider_desc = (token_json or {}).get("error_description") or ""
+            hint = (
+                "Check that your GitHub OAuth App callback URL matches exactly: "
+                f"{redirect_uri}"
+            )
+            msg = "Failed to exchange GitHub code."
+            if provider_err or provider_desc:
+                msg = f"{msg} ({provider_err} {provider_desc})".strip()
+
+            return Response({"detail": msg, "hint": hint}, status=status.HTTP_400_BAD_REQUEST)
 
         headers = {"Authorization": f"Bearer {access_token}"}
 
@@ -338,6 +556,8 @@ class FacebookSocialAuthView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
+        if not getattr(settings, "FACEBOOK_APP_ID", "") or not getattr(settings, "FACEBOOK_APP_SECRET", ""):
+            return Response({"detail": "Facebook login is not configured on the server."}, status=status.HTTP_400_BAD_REQUEST)
         code         = request.data.get("code")
         redirect_uri = request.data.get("redirect_uri", "")
         if not code:
@@ -380,6 +600,8 @@ class MicrosoftSocialAuthView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
+        if not getattr(settings, "MICROSOFT_CLIENT_ID", "") or not getattr(settings, "MICROSOFT_CLIENT_SECRET", ""):
+            return Response({"detail": "Microsoft login is not configured on the server."}, status=status.HTTP_400_BAD_REQUEST)
         code         = request.data.get("code")
         redirect_uri = request.data.get("redirect_uri", "")
         if not code:
@@ -507,6 +729,42 @@ class UserManagementViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsAdminRole]
     serializer_class = UserSerializer
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def perform_destroy(self, instance):
+        """
+        Clear simplejwt blacklist rows before deleting the user.
+
+        When migrations for `token_blacklist` have been applied, PostgreSQL keeps
+        rows in `token_blacklist_outstandingtoken` referencing this user, but
+        `rest_framework_simplejwt.token_blacklist` is often NOT in INSTALLED_APPS,
+        so `OutstandingToken.objects` does not exist — the ORM cleanup cannot run.
+
+        Use raw SQL so deletes always work as long as those tables exist.
+        """
+        from django.db import connection
+        from django.db.utils import ProgrammingError
+
+        uid = instance.pk
+        with connection.cursor() as cur:
+            try:
+                cur.execute(
+                    """
+                    DELETE FROM token_blacklist_blacklistedtoken
+                    WHERE token_id IN (
+                        SELECT id FROM token_blacklist_outstandingtoken
+                        WHERE user_id = %s
+                    );
+                    """,
+                    [uid],
+                )
+                cur.execute(
+                    "DELETE FROM token_blacklist_outstandingtoken WHERE user_id = %s;",
+                    [uid],
+                )
+            except ProgrammingError:
+                # Tables not created (no blacklist migrations) — safe to skip
+                pass
+        instance.delete()
 
     def get_queryset(self):
         qs = (
@@ -734,3 +992,498 @@ class UserManagementViewSet(viewsets.ModelViewSet):
         user.is_active = not user.is_active
         user.save(update_fields=["is_active"])
         return Response(UserSerializer(user, context={"request": request}).data)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  OTP Password-Reset System
+# ══════════════════════════════════════════════════════════════════════════════
+
+PASSWORD_RESET_OTP_TTL_SECONDS = 60
+
+
+def _password_reset_otp_validity_label(total_seconds: int) -> str:
+    """Human-readable expiry for email/HTML (e.g. '60 seconds')."""
+    if total_seconds <= 90:
+        return f"{total_seconds} seconds"
+    minutes, seconds = divmod(total_seconds, 60)
+    if seconds == 0:
+        return f"{minutes} minutes" if minutes != 1 else "1 minute"
+    return f"{minutes} min {seconds} s"
+
+
+def _find_user_by_identifier(identifier: str):
+    """
+    Return (user, send_to_email) for a login identifier.
+
+    Lookup order:
+      1. Primary email
+      2. Verified backup / recovery email
+      3. Username  → sends reset link to primary email
+
+    Returns (None, None) when no match is found.
+    """
+    _User = get_user_model()
+    if "@" in identifier:
+        user = _User.objects.filter(email__iexact=identifier).first()
+        if user:
+            return user, user.email
+        # Try verified backup email
+        user = _User.objects.filter(
+            backup_email__iexact=identifier,
+            backup_email_verified=True,
+            allow_backup_password_reset=True,
+        ).first()
+        if user:
+            return user, user.backup_email
+        return None, None
+    user = _User.objects.filter(username__iexact=identifier).first()
+    return (user, user.email) if user else (None, None)
+
+
+class OTPRequestView(APIView):
+    """POST /api/auth/otp/request/ — email a password-reset link (magic link, no numeric OTP)."""
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = OTPRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        identifier = serializer.validated_data["identifier"]
+
+        user, send_to = _find_user_by_identifier(identifier)
+        if not user:
+            return Response(
+                {"detail": "No account found with this email or username."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not user.is_active:
+            return Response(
+                {"detail": "This account has been deactivated. Contact support."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        sends_to_primary = send_to == user.email
+        if (
+            getattr(user, "block_unverified_email_reset", False)
+            and sends_to_primary
+            and not getattr(user, "email_verified", False)
+        ):
+            return Response(
+                {
+                    "detail": "This account must verify its primary email before using password reset. "
+                    "Sign in if you can, or use a verified recovery email if you added one."
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ok_rl, retry_sec = _otp_throttle_request(request, f"pw:{send_to}")
+        if not ok_rl:
+            return Response(
+                {"detail": f"Too many requests. Try again in {retry_sec} seconds."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(retry_sec)},
+            )
+
+        ok_hr, retry_hr = _password_reset_link_rate_ok(user.pk)
+        if not ok_hr:
+            return Response(
+                {"detail": "Too many reset emails sent. Please wait before requesting again."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(retry_hr)},
+            )
+
+        public_base = (getattr(settings, "PUBLIC_APP_URL", "") or "").strip().rstrip("/")
+        if not public_base:
+            return Response(
+                {
+                    "detail": "Password reset is unavailable: PUBLIC_APP_URL is not configured on the server."
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        ttl_minutes = int(getattr(settings, "PASSWORD_RESET_LINK_TTL_MINUTES", 60) or 60)
+        token = secrets.token_urlsafe(32)
+        store_reset_token(token, user.pk, ttl_minutes=ttl_minutes)
+        reset_link_url = f"{public_base}/reset-password?token={token}"
+        validity_label = _password_reset_otp_validity_label(ttl_minutes * 60)
+
+        sent, send_err = EmailService.send_password_reset_link_email(
+            user,
+            mask_email(send_to),
+            reset_link_url=reset_link_url,
+            validity_label=validity_label,
+            to_email=send_to,
+        )
+        if not sent:
+            detail = (
+                f"Failed to send reset email: {send_err}"
+                if settings.DEBUG and send_err
+                else "Failed to send reset email. Please try again later."
+            )
+            return Response(
+                {"detail": detail},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        if getattr(settings, "RESEND_API_KEY", "") and getattr(settings, "RESEND_FROM", ""):
+            _otp_delivery = "resend"
+        else:
+            _otp_delivery = (
+                "smtp" if "smtp" in (settings.EMAIL_BACKEND or "").lower() else "console"
+            )
+        return Response({
+            "success": True,
+            "message": "Password reset link sent to your registered email address.",
+            "masked_email": mask_email(send_to),
+            "expires_in_seconds": ttl_minutes * 60,
+            "otp_delivery": _otp_delivery,
+        })
+
+
+class OTPVerifyView(APIView):
+    """POST /api/auth/otp/verify/ — verify OTP and obtain a reset token."""
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = OTPVerifySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        identifier = serializer.validated_data["identifier"]
+        otp_code   = serializer.validated_data["otp_code"]
+
+        user, _send_to = _find_user_by_identifier(identifier)
+        if not user:
+            return Response(
+                {"detail": "No account found with this email or username."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Latest unused PASSWORD_RESET OTP
+        otp = (
+            OTPVerification.objects
+            .filter(user=user, otp_type="PASSWORD_RESET", is_used=False)
+            .order_by("-created_at")
+            .first()
+        )
+        if not otp:
+            return Response(
+                {"detail": "No active OTP found. Please request a new one."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if otp.is_expired():
+            return Response(
+                {"detail": "OTP has expired. Please request a new one."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if otp.attempts >= 5:
+            return Response(
+                {"detail": "Too many wrong attempts. Please request a new OTP."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if otp.otp_code != otp_code:
+            otp.attempts += 1
+            otp.save(update_fields=["attempts"])
+            remaining = 5 - otp.attempts
+            return Response(
+                {"detail": f"Incorrect OTP. {remaining} attempt(s) remaining."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # OTP correct — issue a short-lived reset token
+        reset_token = secrets.token_urlsafe(32)
+        store_reset_token(reset_token, user.pk, ttl_minutes=15)
+        otp.mark_used()
+
+        return Response({
+            "success": True,
+            "reset_token": reset_token,
+            "expires_in_minutes": 15,
+        })
+
+
+class PasswordResetOTPView(APIView):
+    """POST /api/auth/otp/reset-password/ — set a new password using a valid reset token."""
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = PasswordResetSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reset_token      = serializer.validated_data["reset_token"]
+        new_password     = serializer.validated_data["new_password"]
+        confirm_password = serializer.validated_data["confirm_password"]
+
+        # Validate reset token
+        user_id = get_reset_token_user(reset_token)
+        if not user_id:
+            return Response(
+                {"detail": "Reset link has expired or is invalid. Please request a new reset link from Forgot Password."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        _User = get_user_model()
+        try:
+            user = _User.objects.get(pk=user_id)
+        except _User.DoesNotExist:
+            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if new_password != confirm_password:
+            return Response({"detail": "Passwords do not match."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Strength checks — ordered most-to-least specific
+        if len(new_password) < 8:
+            return Response({"detail": "Password must be at least 8 characters."}, status=status.HTTP_400_BAD_REQUEST)
+        if not re.search(r"[A-Z]", new_password):
+            return Response({"detail": "Password must contain at least one uppercase letter."}, status=status.HTTP_400_BAD_REQUEST)
+        if not re.search(r"[a-z]", new_password):
+            return Response({"detail": "Password must contain at least one lowercase letter."}, status=status.HTTP_400_BAD_REQUEST)
+        if not re.search(r"[0-9]", new_password):
+            return Response({"detail": "Password must contain at least one digit."}, status=status.HTTP_400_BAD_REQUEST)
+        if not re.search(r"[!@#$%^&*]", new_password):
+            return Response({"detail": "Password must contain at least one special character (!@#$%^&*)."}, status=status.HTTP_400_BAD_REQUEST)
+        if user.check_password(new_password):
+            return Response({"detail": "New password must be different from your current password."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Commit password change — also invalidates existing JWTs via hash change
+        user.set_password(new_password)
+        user.save(update_fields=["password"])
+
+        # Consume the token (one-time use)
+        delete_reset_token(reset_token)
+
+        # Confirmation email (best-effort; errors logged inside EmailService)
+        EmailService.send_password_changed_email(user)
+
+        return Response({
+            "success": True,
+            "message": "Password reset successfully. Please login with your new password.",
+        })
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Backup / Recovery Email
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _backup_email_verify_html(display_name: str, otp_code: str, backup_email: str, year: int) -> str:
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f0f4f8;font-family:Arial,Helvetica,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 0;">
+    <tr><td align="center">
+      <table width="520" cellpadding="0" cellspacing="0"
+             style="background:#fff;border-radius:16px;overflow:hidden;
+                    box-shadow:0 4px 32px rgba(0,0,0,.12);">
+        <tr>
+          <td style="background:linear-gradient(135deg,#065f46 0%,#059669 100%);
+                     padding:36px 40px;text-align:center;">
+            <p style="margin:0;color:#fff;font-size:24px;font-weight:700;">
+              &#128274; CamTraffic AI
+            </p>
+            <p style="margin:8px 0 0;color:rgba(255,255,255,.75);font-size:13px;">
+              Recovery Email Verification
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:36px 40px;">
+            <p style="margin:0 0 14px;color:#1f2937;font-size:15px;">
+              Hi <strong>{display_name}</strong>,
+            </p>
+            <p style="margin:0 0 28px;color:#374151;font-size:15px;line-height:1.6;">
+              You requested to add <strong>{backup_email}</strong> as your recovery email.
+              Enter the code below to verify it — valid for <strong>10&nbsp;minutes</strong>.
+            </p>
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr><td style="background:#f0fdf4;border:2px solid #059669;border-radius:14px;
+                             padding:28px;text-align:center;">
+                <p style="margin:0 0 8px;color:#6b7280;font-size:11px;
+                           text-transform:uppercase;letter-spacing:3px;">Verification Code</p>
+                <p style="margin:0;color:#059669;font-size:48px;font-weight:900;
+                           letter-spacing:14px;font-family:monospace;">{otp_code}</p>
+                <p style="margin:14px 0 0;color:#6b7280;font-size:12px;">
+                  &#9201; Expires in <strong>10 minutes</strong>
+                </p>
+              </td></tr>
+            </table>
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;">
+              <tr><td style="background:#fffbeb;border-left:4px solid #f59e0b;
+                             border-radius:6px;padding:14px 18px;">
+                <p style="margin:0;color:#92400e;font-size:13px;line-height:1.5;">
+                  &#9888; If you didn't request this, you can safely ignore this email.
+                </p>
+              </td></tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#f9fafb;border-top:1px solid #e5e7eb;
+                     padding:18px 40px;text-align:center;">
+            <p style="margin:0;color:#9ca3af;font-size:12px;">
+              &copy; {year} CamTraffic AI &ndash; Traffic Expert System
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+
+
+class BackupEmailRequestView(APIView):
+    """
+    POST  /api/auth/backup-email/  — request OTP to verify a new backup email.
+    DELETE /api/auth/backup-email/ — remove the current backup email.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = BackupEmailRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        new_backup = serializer.validated_data["backup_email"]
+
+        _User = get_user_model()
+
+        if new_backup == request.user.email.lower():
+            return Response(
+                {"detail": "Recovery email cannot be the same as your primary email."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Must not be another user's primary email
+        if _User.objects.filter(email__iexact=new_backup).exclude(pk=request.user.pk).exists():
+            return Response(
+                {"detail": "This email is already registered as someone else's primary email."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Must not be another user's verified backup email
+        if _User.objects.filter(
+            backup_email__iexact=new_backup, backup_email_verified=True
+        ).exclude(pk=request.user.pk).exists():
+            return Response(
+                {"detail": "This email is already used as another account's recovery email."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Rate limit: max 3 EMAIL_VERIFY OTPs per hour
+        window_start = timezone.now() - timedelta(hours=1)
+        if OTPVerification.objects.filter(
+            user=request.user, otp_type="EMAIL_VERIFY",
+            is_used=False, created_at__gte=window_start,
+        ).count() >= 3:
+            return Response(
+                {"detail": "Too many verification requests. Please wait before trying again."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        # Invalidate old EMAIL_VERIFY OTPs
+        OTPVerification.objects.filter(
+            user=request.user, otp_type="EMAIL_VERIFY", is_used=False
+        ).update(is_used=True)
+
+        # Cache the pending email for the confirm step
+        cache.set(f"backup_email_pending:{request.user.pk}", new_backup, timeout=15 * 60)
+
+        # Create OTP
+        otp_code = generate_otp_code()
+        OTPVerification.objects.create(
+            user=request.user,
+            otp_code=otp_code,
+            otp_type="EMAIL_VERIFY",
+            expires_at=timezone.now() + timedelta(minutes=10),
+            ip_address=get_client_ip(request),
+        )
+
+        # Send to the NEW backup email (not primary)
+        sent, send_err = EmailService.send_otp_email(
+            user=request.user,
+            otp_code=otp_code,
+            masked_email=mask_email(new_backup),
+            expires_minutes=10.0,
+            to_email=new_backup,
+            validity_label="10 minutes",
+        )
+        if not sent:
+            detail = (
+                f"Failed to send verification email: {send_err}"
+                if settings.DEBUG and send_err
+                else "Failed to send verification email. Please try again later."
+            )
+            return Response({"detail": detail}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({
+            "success": True,
+            "message": "Verification code sent to your recovery email.",
+            "masked_email": mask_email(new_backup),
+            "expires_in_minutes": 10,
+        })
+
+    def delete(self, request):
+        user = request.user
+        user.backup_email = None
+        user.backup_email_verified = False
+        user.save(update_fields=["backup_email", "backup_email_verified"])
+        cache.delete(f"backup_email_pending:{user.pk}")
+        return Response({"success": True, "message": "Recovery email removed."})
+
+
+class BackupEmailConfirmView(APIView):
+    """POST /api/auth/backup-email/confirm/ — verify OTP and activate backup email."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = BackupEmailConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        otp_code = serializer.validated_data["otp_code"]
+
+        pending_email = cache.get(f"backup_email_pending:{request.user.pk}")
+        if not pending_email:
+            return Response(
+                {"detail": "No recovery email verification in progress. Please start over."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        otp = (
+            OTPVerification.objects
+            .filter(user=request.user, otp_type="EMAIL_VERIFY", is_used=False)
+            .order_by("-created_at")
+            .first()
+        )
+        if not otp:
+            return Response(
+                {"detail": "No active OTP found. Please request a new one."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if otp.is_expired():
+            return Response(
+                {"detail": "OTP has expired. Please request a new one."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if otp.attempts >= 5:
+            return Response(
+                {"detail": "Too many wrong attempts. Please request a new OTP."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if otp.otp_code != otp_code:
+            otp.attempts += 1
+            otp.save(update_fields=["attempts"])
+            remaining = 5 - otp.attempts
+            return Response(
+                {"detail": f"Incorrect OTP. {remaining} attempt(s) remaining."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Save verified backup email
+        user = request.user
+        user.backup_email = pending_email
+        user.backup_email_verified = True
+        user.save(update_fields=["backup_email", "backup_email_verified"])
+        otp.mark_used()
+        cache.delete(f"backup_email_pending:{user.pk}")
+
+        return Response({
+            "success": True,
+            "message": "Recovery email verified and saved.",
+            "backup_email": pending_email,
+            "backup_email_verified": True,
+        })

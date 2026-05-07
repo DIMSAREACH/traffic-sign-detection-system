@@ -2,7 +2,7 @@ from django.contrib.auth import authenticate
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import Driver, Officer, Permission, Role, RolePermission, User, UserRole
+from .models import Driver, Officer, Permission, Role, RolePermission, User, UserRole  # noqa: F401
 
 
 class RoleSerializer(serializers.ModelSerializer):
@@ -63,7 +63,31 @@ class UserSerializer(serializers.ModelSerializer):
             "role",
             "driver_profile",
             "officer_profile",
+            "backup_email",
+            "backup_email_verified",
+            "allow_backup_password_reset",
+            "keep_email_private",
+            "block_unverified_email_reset",
         ]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        viewer = getattr(request, "user", None) if request else None
+        if not viewer or not viewer.is_authenticated:
+            return data
+        if viewer.pk == instance.pk:
+            return data
+        if viewer.is_staff or viewer.is_superuser or viewer.has_role("admin"):
+            return data
+        if getattr(instance, "keep_email_private", True):
+            from utils.otp import mask_email
+
+            if data.get("email"):
+                data["email"] = mask_email(instance.email)
+            if instance.backup_email and data.get("backup_email"):
+                data["backup_email"] = mask_email(instance.backup_email)
+        return data
 
     def get_avatar_url(self, obj):
         if not obj.avatar:
@@ -87,7 +111,15 @@ class UserSerializer(serializers.ModelSerializer):
 class ProfileUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["username", "first_name", "last_name", "phone"]
+        fields = [
+            "username",
+            "first_name",
+            "last_name",
+            "phone",
+            "allow_backup_password_reset",
+            "keep_email_private",
+            "block_unverified_email_reset",
+        ]
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -190,3 +222,51 @@ class OfficerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Officer
         fields = ["id", "user", "badge_number", "station", "rank"]
+
+
+# ── OTP serializers ───────────────────────────────────────────────────────────
+
+class BackupEmailRequestSerializer(serializers.Serializer):
+    backup_email = serializers.EmailField(required=True)
+
+    def validate_backup_email(self, value):
+        return value.strip().lower()
+
+
+class BackupEmailConfirmSerializer(serializers.Serializer):
+    otp_code = serializers.CharField(min_length=6, max_length=6)
+
+    def validate_otp_code(self, value):
+        if not value.isdigit():
+            raise serializers.ValidationError("OTP code must contain digits only.")
+        return value
+
+
+class OTPRequestSerializer(serializers.Serializer):
+    identifier = serializers.CharField(
+        required=True,
+        max_length=255,
+        help_text="Email address or username of the account.",
+    )
+
+    def validate_identifier(self, value):
+        return value.strip()
+
+
+class OTPVerifySerializer(serializers.Serializer):
+    identifier = serializers.CharField(required=True, max_length=255)
+    otp_code   = serializers.CharField(min_length=6, max_length=6)
+
+    def validate_identifier(self, value):
+        return value.strip()
+
+    def validate_otp_code(self, value):
+        if not value.isdigit():
+            raise serializers.ValidationError("OTP code must contain digits only.")
+        return value
+
+
+class PasswordResetSerializer(serializers.Serializer):
+    reset_token      = serializers.CharField(required=True)
+    new_password     = serializers.CharField(required=True)
+    confirm_password = serializers.CharField(required=True)

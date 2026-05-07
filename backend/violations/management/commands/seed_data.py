@@ -20,7 +20,8 @@ from django.utils import timezone
 from accounts.models import Driver, Role, User, UserRole
 from cameras.models import Camera, Road, TrafficSign
 from vehicles.models import Vehicle
-from violations.models import Fine, TrafficViolation
+from notifications.models import Notification
+from violations.models import Fine, Payment, TrafficViolation
 
 
 VIOLATION_TYPES = [
@@ -45,6 +46,17 @@ LOCATIONS = [
     "Mao Tse Toung Blvd",
     "Sihanouk Blvd",
     "Olympic Stadium Area",
+]
+
+CAMERA_COORDS_PP = [
+    (11.5564, 104.9282),  # Phnom Penh center
+    (11.5657, 104.9221),  # Toul Kork
+    (11.5460, 104.9356),  # BKK1
+    (11.5449, 104.8930),  # Airport side
+    (11.5830, 104.9160),  # Sen Sok
+    (11.5427, 104.9110),  # Olympic area
+    (11.5589, 104.9113),  # Riverside-ish
+    (11.5300, 104.9150),  # South
 ]
 
 FINE_AMOUNTS = {
@@ -86,6 +98,10 @@ class Command(BaseCommand):
                 cur.execute("DELETE FROM vehicles_vehicle WHERE plate_number = ANY(%s);",
                             [[v[0] for v in VEHICLE_DATA]])
                 cur.execute("DELETE FROM cameras_camera WHERE name LIKE 'CAM-%%';")
+                # Clear signs referencing seeded roads before deleting roads (FK constraint).
+                cur.execute(
+                    "DELETE FROM cameras_trafficsign WHERE road_id IN (SELECT id FROM cameras_road WHERE code LIKE 'SEED-%%');"
+                )
                 cur.execute("DELETE FROM cameras_road WHERE code LIKE 'SEED-%%';")
             self.stdout.write(self.style.WARNING("Cleared."))
 
@@ -120,6 +136,16 @@ class Command(BaseCommand):
                 name=name,
                 defaults={"road": road, "ip_address": ip, "location": road.location, "active": active},
             )
+            # Ensure coordinates exist for map view
+            if getattr(c, "latitude", None) in (None, 0) or getattr(c, "longitude", None) in (None, 0):
+                lat, lng = CAMERA_COORDS_PP[len(cameras) % len(CAMERA_COORDS_PP)]
+                try:
+                    c.latitude = lat
+                    c.longitude = lng
+                    c.save(update_fields=["latitude", "longitude"])
+                except Exception:
+                    # camera model may not have coords; ignore gracefully
+                    pass
             cameras.append(c)
         self.stdout.write(f"  Cameras:  {len(cameras)} (6 active)")
 
@@ -251,7 +277,41 @@ class Command(BaseCommand):
                         payment_date=pay_date,
                     ),
                 )
+
+                # Create payment records for paid fines (so Payments page is populated and linked)
+                if fstatus == "paid":
+                    Payment.objects.get_or_create(
+                        violation=v,
+                        status="completed",
+                        defaults={
+                            "amount": amount,
+                            "method": random.choice(["cash", "bank_transfer", "mobile_payment", "credit_card"]),
+                            "reference": f"SEED-{v.id}-{random.randint(1000,9999)}",
+                            "notes": "Seeded payment record",
+                        },
+                    )
+
+                # Create realistic notifications for the driver user
+                if v.driver and v.driver.user:
+                    if vstatus in ("pending", "verified"):
+                        Notification.objects.create(
+                            user=v.driver.user,
+                            title="New traffic violation detected",
+                            message=f"A {v.violation_type.replace('_',' ')} violation was recorded at {v.location or 'your route'}.",
+                            notif_type="violation",
+                            is_read=False,
+                        )
+                    if fstatus in ("pending", "overdue"):
+                        Notification.objects.create(
+                            user=v.driver.user,
+                            title="Fine payment required",
+                            message=f"Your fine of ${amount} is {fstatus}. Due date: {due}.",
+                            notif_type="fine",
+                            is_read=False,
+                        )
                 created_v += 1
 
         self.stdout.write(f"  Violations + Fines: {created_v}")
+        self.stdout.write("  Payments:  completed records created for paid fines")
+        self.stdout.write("  Notifications: created for violations/fines")
         self.stdout.write(self.style.SUCCESS("\nSeed complete!"))
