@@ -1,5 +1,6 @@
 import React, { lazy, Suspense } from "react";
 import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
+import { Analytics } from "@vercel/analytics/react";
 
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import RoleRoute from "./components/RoleRoute.jsx";
@@ -141,9 +142,10 @@ function DashboardIndex() {
 
 export default function App() {
   return (
-    <Routes>
-      <Route element={<DedicatedAdminSurfaceEnforcer />}>
-        <Route path="/" element={<RootRedirect />} />
+    <>
+      <Routes>
+        <Route element={<DedicatedAdminSurfaceEnforcer />}>
+          <Route path="/" element={<RootRedirect />} />
 
         <Route element={<AuthLayout />}>
           <Route path="/login" element={<Login />} />
@@ -255,5 +257,7 @@ export default function App() {
         />
       </Route>
     </Routes>
+    <Analytics />
+    </>
   );
 }
