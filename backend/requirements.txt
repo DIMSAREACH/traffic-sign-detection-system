@@ -13,5 +13,7 @@ ultralytics==8.3.0
 easyocr==1.7.1
 google-auth
 requests
+gunicorn>=22.0.0
+django-redis>=5.4.0
 pytest>=9.0
 pytest-django>=4.12
