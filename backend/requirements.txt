@@ -17,5 +17,6 @@ google-auth
 requests
 gunicorn>=22.0.0
 django-redis>=5.4.0
+whitenoise>=6.8.0
 pytest>=9.0
 pytest-django>=4.12

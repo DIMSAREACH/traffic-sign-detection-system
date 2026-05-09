@@ -1,13 +1,40 @@
-FROM python:3.11-slim
+# Render: Web Service → Environment = Docker, Root Directory = backend, Dockerfile path = Dockerfile
+# Set DB_*, DJANGO_*, REDIS/CORS, etc. in the Render dashboard (not from copied .env).
 
-WORKDIR /app
+FROM python:3.12-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-COPY requirements.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt
+# Runtime libs for Pillow, OpenCV headless, PyTorch/ultralytics CPU wheels
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    libglib2.0-0 \
+    libgomp1 \
+    libjpeg62-turbo \
+    zlib1g \
+  && rm -rf /var/lib/apt/lists/*
 
-COPY . /app/
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip \
+  && pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+RUN chmod +x docker-entrypoint.sh
+
+# Bake admin/static assets into the image (WhiteNoise serves them in production)
+ENV DJANGO_SECRET_KEY=collectstatic-build-only-not-used-at-runtime \
+    DJANGO_DEBUG=False \
+    DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
+RUN python manage.py collectstatic --noinput
+
+RUN adduser --disabled-password --gecos "" appuser \
+  && chown -R appuser:appuser /app
+USER appuser
 
 EXPOSE 8000
+
+ENTRYPOINT ["./docker-entrypoint.sh"]
