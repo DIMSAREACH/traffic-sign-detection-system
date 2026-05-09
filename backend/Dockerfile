@@ -6,20 +6,24 @@ FROM python:3.12-slim-bookworm
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Runtime libs for Pillow, OpenCV headless, PyTorch/ultralytics CPU wheels
+# Runtime libs for Pillow, PyTorch/ultralytics, OpenCV.
+# libgl1: ultralytics often pulls opencv-python (non-headless), which links libGL.so.1.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libgomp1 \
     libjpeg62-turbo \
     zlib1g \
+    libgl1 \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
-  && pip install --no-cache-dir -r requirements.txt
+  && pip install --no-cache-dir -r requirements.txt \
+  && pip uninstall -y opencv-python 2>/dev/null || true \
+  && pip install --no-cache-dir --force-reinstall "opencv-python-headless==4.10.0.84"
 
 COPY . .
 
