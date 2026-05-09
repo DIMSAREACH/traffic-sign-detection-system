@@ -176,9 +176,9 @@ class LoginSerializer(serializers.Serializer):
         email = attrs.get("email", "").strip().lower()
         password = attrs.get("password")
 
-        # Check if user exists first — gives a clearer error
+        # Check if user exists first — gives a clearer error (match EmailBackend: case-insensitive).
         from .models import User as UserModel
-        if not UserModel.objects.filter(email=email).exists():
+        if not UserModel.objects.filter(email__iexact=email).exists():
             raise serializers.ValidationError("No account found with this email address.")
 
         user = authenticate(email=email, password=password)

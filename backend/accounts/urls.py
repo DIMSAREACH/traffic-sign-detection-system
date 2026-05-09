@@ -31,7 +31,11 @@ router.register("users", UserManagementViewSet, basename="user-management")
 urlpatterns = [
     path("register/",               RegisterView.as_view(),             name="register"),
     path("login/",                  LoginView.as_view(),                name="login"),
-    path("token/refresh/",          TokenRefreshView.as_view(),         name="token-refresh"),
+    path(
+        "token/refresh/",
+        TokenRefreshView.as_view(throttle_classes=[]),
+        name="token-refresh",
+    ),
     path("profile/",                ProfileView.as_view(),              name="profile"),
     path("avatar/",                 AvatarUploadView.as_view(),         name="avatar-upload"),
     path("change-password/",        ChangePasswordView.as_view(),       name="change-password"),

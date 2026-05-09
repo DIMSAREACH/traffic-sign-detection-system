@@ -151,6 +151,8 @@ class RegisterView(generics.CreateAPIView):
 
 class LoginView(APIView):
     permission_classes = [permissions.AllowAny]
+    # Anonymous throttle uses the cache; a broken Redis config becomes HTTP 500 on login.
+    throttle_classes = []
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data, context={"request": request})

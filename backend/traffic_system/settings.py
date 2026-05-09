@@ -1,4 +1,5 @@
 import os
+import ssl
 from datetime import timedelta
 from pathlib import Path
 
@@ -176,17 +177,37 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 
-# ── Cache (used for OTP throttling / rate limit) ───────────────────────────────
-# Default is in-memory cache (ok for dev). For production, set REDIS_URL and use
-# a Redis cache backend.
+# ── Cache (OTP throttling, password-reset tokens, DRF anon/user throttles) ───
+_cache_backend = os.getenv(
+    "DJANGO_CACHE_BACKEND",
+    "django.core.cache.backends.locmem.LocMemCache",
+)
+_cache_location = (os.getenv("DJANGO_CACHE_LOCATION") or "").strip()
+_redis_url = (os.getenv("REDIS_URL") or "").strip()
+if "RedisCache" in _cache_backend and not _cache_location and _redis_url:
+    _cache_location = _redis_url
+if not _cache_location:
+    _cache_location = "traffic-system-cache"
+
+_cache_options: dict = {}
+if "RedisCache" in _cache_backend:
+    _cache_options["CLIENT_CLASS"] = "django_redis.client.DefaultClient"
+    if str(_cache_location).startswith("rediss://"):
+        _ssl_mode = (os.getenv("REDIS_SSL_CERT_REQS") or "required").strip().lower()
+        _cert_reqs = ssl.CERT_NONE if _ssl_mode in ("none", "false", "0") else ssl.CERT_REQUIRED
+        _cache_options["CONNECTION_POOL_KWARGS"] = {
+            "ssl_cert_reqs": _cert_reqs,
+            "ssl_check_hostname": _cert_reqs != ssl.CERT_NONE,
+        }
+    if os.getenv("REDIS_IGNORE_EXCEPTIONS", "").strip().lower() in ("1", "true", "yes"):
+        _cache_options["IGNORE_EXCEPTIONS"] = True
+
 CACHES = {
     "default": {
-        "BACKEND": os.getenv(
-            "DJANGO_CACHE_BACKEND",
-            "django.core.cache.backends.locmem.LocMemCache",
-        ),
-        "LOCATION": os.getenv("DJANGO_CACHE_LOCATION", "traffic-system-cache"),
+        "BACKEND": _cache_backend,
+        "LOCATION": _cache_location,
         "TIMEOUT": None,
+        **({"OPTIONS": _cache_options} if _cache_options else {}),
     }
 }
 
