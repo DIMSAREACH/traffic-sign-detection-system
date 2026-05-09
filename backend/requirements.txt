@@ -4,11 +4,13 @@ djangorestframework-simplejwt==5.3.1
 django-cors-headers==4.4.0
 django-filter==24.3
 drf-spectacular==0.29.0
-psycopg2-binary==2.9.9
+# psycopg3 (Django 5 prefers it; avoids broken psycopg2 wheels on new Python e.g. 3.14).
+psycopg[binary]>=3.1.8,<4
 python-dotenv==1.0.1
 Pillow==10.4.0
 reportlab>=4.0
-opencv-python==4.10.0.84
+# Headless build: avoids libGL/libgtk deps on minimal hosts (e.g. Render).
+opencv-python-headless==4.10.0.84
 ultralytics==8.3.0
 easyocr==1.7.1
 google-auth
