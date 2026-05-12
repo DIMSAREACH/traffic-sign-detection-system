@@ -276,18 +276,9 @@ MICROSOFT_TENANT_ID   = os.getenv("MICROSOFT_TENANT_ID", "common")
 
 # ── Production security hardening ──────────────────────────────────────────────
 if not DEBUG:
-    # Render (and similar) terminate TLS and forward HTTP to the app with this header.
-    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-    SECURE_SSL_REDIRECT = True
-    SECURE_HSTS_SECONDS = 31_536_000        # 1 year
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    SECURE_HSTS_PRELOAD = True
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = "DENY"
-    # Add STATIC_ROOT for collectstatic in production
     STATIC_ROOT = BASE_DIR / "staticfiles"
     STORAGES = {
         "default": {
@@ -297,3 +288,20 @@ if not DEBUG:
             "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
         },
     }
+    if _APPEND_LOCAL_VITE_CORS:
+        # Local `runserver` over HTTP while DEBUG=False — never redirect to HTTPS (avoids ERR_SSL_PROTOCOL_ERROR).
+        SECURE_SSL_REDIRECT = False
+        SESSION_COOKIE_SECURE = False
+        CSRF_COOKIE_SECURE = False
+        SECURE_HSTS_SECONDS = 0
+        SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+        SECURE_HSTS_PRELOAD = False
+    else:
+        # Render (and similar) terminate TLS and forward HTTP to the app with this header.
+        SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+        SECURE_SSL_REDIRECT = True
+        SECURE_HSTS_SECONDS = 31_536_000        # 1 year
+        SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+        SECURE_HSTS_PRELOAD = True
+        SESSION_COOKIE_SECURE = True
+        CSRF_COOKIE_SECURE = True
