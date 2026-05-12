@@ -90,6 +90,13 @@ if _use_sqlite:
         }
     }
 else:
+    _pg_options = {
+        # Neon (and most hosted Postgres) requires SSL.
+        "sslmode": _env_strip_quotes(os.getenv("DB_SSLMODE", "prefer")) or "prefer",
+    }
+    _channel_binding = _env_strip_quotes(os.getenv("DB_CHANNEL_BINDING", ""))
+    if _channel_binding:
+        _pg_options["channel_binding"] = _channel_binding
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
@@ -98,10 +105,7 @@ else:
             "PASSWORD": _env_strip_quotes(os.getenv("DB_PASSWORD", "postgres")),
             "HOST": _env_strip_quotes(os.getenv("DB_HOST", "localhost")),
             "PORT": _env_strip_quotes(os.getenv("DB_PORT", "5432")) or "5432",
-            "OPTIONS": {
-                # Neon (and most hosted Postgres) requires SSL.
-                "sslmode": os.getenv("DB_SSLMODE", "prefer"),
-            },
+            "OPTIONS": _pg_options,
         }
     }
 
