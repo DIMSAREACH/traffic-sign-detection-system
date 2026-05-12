@@ -27,9 +27,9 @@ export default function Paginator({ page, total, pageSize, onChange, loading = f
   const start      = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const end        = Math.min(page * pageSize, total);
 
-  const btn = (label, targetPage, active = false, disabled = false) => (
+  const btn = (reactKey, label, targetPage, active = false, disabled = false) => (
     <button
-      key={label}
+      key={reactKey}
       disabled={disabled || loading}
       onClick={() => !disabled && !loading && onChange(targetPage)}
       style={{
@@ -88,6 +88,7 @@ export default function Paginator({ page, total, pageSize, onChange, loading = f
       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
         {/* prev */}
         {btn(
+          "paginator-prev",
           <i className="bi bi-chevron-left" style={{ fontSize: ".75rem" }} />,
           page - 1,
           false,
@@ -99,11 +100,12 @@ export default function Paginator({ page, total, pageSize, onChange, loading = f
             ? (
               <span key={`ellipsis-${i}`} style={{ padding: "0 4px", color: "var(--text-muted, #94a3b8)" }}>…</span>
             )
-            : btn(n, n, n === page)
+            : btn(`paginator-page-${n}`, n, n, n === page)
         )}
 
         {/* next */}
         {btn(
+          "paginator-next",
           <i className="bi bi-chevron-right" style={{ fontSize: ".75rem" }} />,
           page + 1,
           false,
