@@ -26,6 +26,13 @@ _render_host = os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip()
 if _render_host and _render_host not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append(_render_host)
 
+# Local PC + Vite (localhost:5173) while DJANGO_DEBUG=False (e.g. prod-like settings): set DJANGO_APPEND_LOCAL_VITE_CORS=1
+_APPEND_LOCAL_VITE_CORS = os.getenv("DJANGO_APPEND_LOCAL_VITE_CORS", "").strip().lower() in ("1", "true", "yes")
+if _APPEND_LOCAL_VITE_CORS:
+    for h in ("localhost", "127.0.0.1", "[::1]"):
+        if h not in ALLOWED_HOSTS:
+            ALLOWED_HOSTS.append(h)
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -162,9 +169,9 @@ CORS_ALLOWED_ORIGINS = [
 # Required for axios `withCredentials: true` (refresh cookie / auth flows).
 CORS_ALLOW_CREDENTIALS = True
 
-# In development, always allow the Vite dev server origins
-if DEBUG:
-    CORS_ALLOWED_ORIGINS += [
+# In development, allow Vite dev origins. With DJANGO_DEBUG=False, set DJANGO_APPEND_LOCAL_VITE_CORS=1 for local runserver.
+if DEBUG or _APPEND_LOCAL_VITE_CORS:
+    _vite_local = [
         "http://localhost:5173",
         "http://localhost:5174",
         "http://localhost:5175",
@@ -172,6 +179,9 @@ if DEBUG:
         "http://127.0.0.1:5174",
         "http://127.0.0.1:5175",
     ]
+    for o in _vite_local:
+        if o not in CORS_ALLOWED_ORIGINS:
+            CORS_ALLOWED_ORIGINS.append(o)
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
