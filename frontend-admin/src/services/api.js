@@ -327,7 +327,7 @@ api.interceptors.response.use(
     if (!originalRequest) return Promise.reject(error);
 
     if (error?.response?.status === 401 && !originalRequest._retry) {
-      if (originalRequest.url?.includes("/auth/token/refresh/")) {
+      if (originalRequest.url?.includes("auth/token/refresh/")) {
         clearAccessToken();
         return Promise.reject(error);
       }

@@ -1,27 +1,27 @@
 import api from "./api.js";
 
 export async function fetchDashboard(params = {}) {
-  const { data } = await api.get("/reports/dashboard/", { params });
+  const { data } = await api.get("reports/dashboard/", { params });
   return data;
 }
 
 export async function fetchMyDashboard() {
-  const { data } = await api.get("/reports/my-dashboard/");
+  const { data } = await api.get("reports/my-dashboard/");
   return data;
 }
 
 export async function fetchMonthly(params = {}) {
-  const { data } = await api.get("/reports/monthly/", { params });
+  const { data } = await api.get("reports/monthly/", { params });
   return data.monthly ?? data;
 }
 
 export async function fetchSystemHealth() {
-  const { data } = await api.get("/reports/system-health/");
+  const { data } = await api.get("reports/system-health/");
   return data;
 }
 
 export async function downloadCSV(params = {}) {
-  const response = await api.get("/reports/export/csv/", {
+  const response = await api.get("reports/export/csv/", {
     params,
     responseType: "blob",
   });
@@ -34,7 +34,7 @@ export async function downloadCSV(params = {}) {
 }
 
 export async function downloadPDF(params = {}) {
-  const response = await api.get("/reports/export/pdf/", {
+  const response = await api.get("reports/export/pdf/", {
     params,
     responseType: "blob",
   });

@@ -1,6 +1,7 @@
 import api from "./api.js";
 
-const BASE = "/notifications/";
+/** Relative to axios `baseURL` (must not start with `/` or some clients resolve against the site origin). */
+const BASE = "notifications/";
 
 /** Paginated list for the Notifications page */
 export const listNotifications  = (params = {}) => api.get(BASE, { params }).then(r => r.data);

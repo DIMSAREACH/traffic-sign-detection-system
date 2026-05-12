@@ -1,7 +1,7 @@
 import api from "./api.js";
 
 export async function listViolations(params = {}) {
-  const { data } = await api.get("/violations/", { params });
+  const { data } = await api.get("violations/", { params });
   return data;
 }
 
@@ -11,7 +11,7 @@ export async function fetchViolation(id) {
 }
 
 export async function createViolation(payload) {
-  const { data } = await api.post("/violations/", payload);
+  const { data } = await api.post("violations/", payload);
   return data;
 }
 
@@ -30,11 +30,11 @@ export async function updateViolationStatus(id, status) {
 }
 
 export async function bulkUpdateStatus(ids, status) {
-  const { data } = await api.post("/violations/bulk-status/", { ids, status });
+  const { data } = await api.post("violations/bulk-status/", { ids, status });
   return data;
 }
 
 export async function bulkDeleteViolations(ids) {
-  const { data } = await api.post("/violations/bulk-delete/", { ids });
+  const { data } = await api.post("violations/bulk-delete/", { ids });
   return data;
 }

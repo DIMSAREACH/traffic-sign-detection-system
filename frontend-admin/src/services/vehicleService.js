@@ -1,7 +1,7 @@
 import api from "./api.js";
 
 export async function listVehicles(params = {}) {
-  const { data } = await api.get("/vehicles/", { params });
+  const { data } = await api.get("vehicles/", { params });
   return data;
 }
 
@@ -11,7 +11,7 @@ export async function getVehicle(id) {
 }
 
 export async function createVehicle(payload) {
-  const { data } = await api.post("/vehicles/", payload);
+  const { data } = await api.post("vehicles/", payload);
   return data;
 }
 

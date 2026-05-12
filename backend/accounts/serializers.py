@@ -43,8 +43,9 @@ class UserSerializer(serializers.ModelSerializer):
     roles = UserRoleSerializer(many=True, source="user_roles", read_only=True)
     avatar_url = serializers.SerializerMethodField()
     role = serializers.SerializerMethodField()
-    driver_profile = DriverProfileInlineSerializer(read_only=True)
-    officer_profile = OfficerProfileInlineSerializer(read_only=True)
+    # OneToOne reverse accessors raise DoesNotExist if missing — not safe as nested ModelSerializer fields.
+    driver_profile = serializers.SerializerMethodField()
+    officer_profile = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -90,12 +91,33 @@ class UserSerializer(serializers.ModelSerializer):
         return data
 
     def get_avatar_url(self, obj):
-        if not obj.avatar:
+        try:
+            if not obj.avatar or not getattr(obj.avatar, "name", None):
+                return None
+            url = obj.avatar.url
+        except Exception:
             return None
         request = self.context.get("request")
         if request:
-            return request.build_absolute_uri(obj.avatar.url)
-        return obj.avatar.url
+            try:
+                return request.build_absolute_uri(url)
+            except Exception:
+                return url
+        return url
+
+    def get_driver_profile(self, obj):
+        try:
+            prof = obj.driver_profile
+        except Driver.DoesNotExist:
+            return None
+        return DriverProfileInlineSerializer(prof, context=self.context).data
+
+    def get_officer_profile(self, obj):
+        try:
+            prof = obj.officer_profile
+        except Officer.DoesNotExist:
+            return None
+        return OfficerProfileInlineSerializer(prof, context=self.context).data
 
     def get_role(self, obj):
         """Return the primary role name (admin > officer > driver) as a flat string."""

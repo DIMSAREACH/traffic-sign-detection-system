@@ -24,6 +24,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.models import Driver
 from accounts.permissions import IsOfficerOrAdminRole
 from cameras.models import Camera
 from notifications.models import Notification
@@ -92,9 +93,10 @@ class DashboardReportView(APIView):
 
         # Daily trend – last 30 days
         today = timezone.now().date()
+        tz = timezone.get_current_timezone()
         daily_trend = (
             qs.filter(date__date__gte=today - timedelta(days=29))
-            .annotate(day=TruncDay("date"))
+            .annotate(day=TruncDay("date", tzinfo=tz))
             .values("day")
             .annotate(count=Count("id"))
             .order_by("day")
@@ -151,8 +153,9 @@ class MonthlyReportView(APIView):
 
     def get(self, request):
         qs = _date_qs(request, TrafficViolation.objects.all())
+        tz = timezone.get_current_timezone()
         monthly = (
-            qs.annotate(month=TruncMonth("date"))
+            qs.annotate(month=TruncMonth("date", tzinfo=tz))
             .values("month")
             .annotate(count=Count("id"))
             .order_by("month")
@@ -166,7 +169,11 @@ class MyDashboardView(APIView):
 
     def get(self, request):
         user = request.user
-        driver = getattr(user, "driver_profile", None)
+        driver = None
+        try:
+            driver = user.driver_profile
+        except Driver.DoesNotExist:
+            driver = None
 
         if driver:
             violations = TrafficViolation.objects.filter(driver=driver)

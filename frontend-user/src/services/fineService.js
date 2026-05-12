@@ -1,7 +1,7 @@
 import api from "./api.js";
 
 export async function listFines(params = {}) {
-  const { data } = await api.get("/violations/fines/", { params });
+  const { data } = await api.get("violations/fines/", { params });
   return data;
 }
 
@@ -11,7 +11,7 @@ export async function fetchFine(id) {
 }
 
 export async function fetchFineSummary() {
-  const { data } = await api.get("/violations/fines/summary/");
+  const { data } = await api.get("violations/fines/summary/");
   return data;
 }
 

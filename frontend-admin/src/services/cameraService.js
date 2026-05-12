@@ -1,6 +1,6 @@
 import api from "./api.js";
 
-const BASE = "/cameras/";
+const BASE = "cameras/";
 
 /* ── Cameras ── */
 export const listCameras   = (params = {}) => api.get(`${BASE}cameras/`, { params }).then(r => r.data);

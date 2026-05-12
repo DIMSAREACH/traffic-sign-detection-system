@@ -1,7 +1,7 @@
 import api from "./api.js";
 
 export async function listDrivers(params = {}) {
-  const { data } = await api.get("/drivers/", { params });
+  const { data } = await api.get("drivers/", { params });
   return data;
 }
 
@@ -11,7 +11,7 @@ export async function fetchDriver(id) {
 }
 
 export async function createDriver(payload) {
-  const { data } = await api.post("/drivers/", payload);
+  const { data } = await api.post("drivers/", payload);
   return data;
 }
 

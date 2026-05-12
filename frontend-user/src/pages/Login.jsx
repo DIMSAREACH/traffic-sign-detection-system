@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useGoogleLogin } from "@react-oauth/google";
 
 import { useAuth, getRoleHomePath } from "../context/AuthContext.jsx";
-import { socialLogin } from "../services/authService.js";
+import { socialLogin, formatApiError } from "../services/authService.js";
 import { getAdminPort, isAdminPortal } from "../utils/portal.js";
 import "./Login.css";
 
@@ -104,11 +104,7 @@ export default function Login() {
         { replace: true }
       );
     } catch (err) {
-      const detail = err?.response?.data?.non_field_errors?.[0]
-                  || err?.response?.data?.detail
-                  || err?.message
-                  || "Invalid email or password. Please try again.";
-      setError(detail);
+      setError(formatApiError(err, "Invalid email or password. Please try again."));
     } finally {
       setLoading(false);
     }

@@ -1,7 +1,7 @@
 import api from "./api.js";
 
 export async function listPayments(params = {}) {
-  const { data } = await api.get("/violations/payments/", { params });
+  const { data } = await api.get("violations/payments/", { params });
   return data;
 }
 
@@ -11,7 +11,7 @@ export async function fetchPayment(id) {
 }
 
 export async function createPayment(payload) {
-  const { data } = await api.post("/violations/payments/", payload);
+  const { data } = await api.post("violations/payments/", payload);
   return data;
 }
 
@@ -26,6 +26,6 @@ export async function deletePayment(id) {
 }
 
 export async function fetchPaymentSummary() {
-  const { data } = await api.get("/violations/payments/summary/");
+  const { data } = await api.get("violations/payments/summary/");
   return data;
 }

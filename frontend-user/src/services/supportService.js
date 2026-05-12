@@ -1,6 +1,6 @@
 import api from "./api.js";
 
-const BASE = "/support/reports/";
+const BASE = "support/reports/";
 
 /** Submit a new issue report (accepts FormData or plain object) */
 export const createIssueReport = (data) => {
