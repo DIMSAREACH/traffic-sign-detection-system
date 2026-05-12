@@ -17,6 +17,7 @@ dist/
 # Django
 media/
 staticfiles/
+backend/db.sqlite3
 
 # IDEs
 .idea/

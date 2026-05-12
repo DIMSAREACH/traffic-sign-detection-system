@@ -8,6 +8,17 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
+
+def _env_strip_quotes(value: str | None) -> str:
+    """Strip one pair of surrounding ' or \" from .env (common bad paste from Neon/psql)."""
+    if not value or not isinstance(value, str):
+        return ""
+    s = value.strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+        return s[1:-1].strip()
+    return s
+
+
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "change-me")
 DEBUG = os.getenv("DJANGO_DEBUG", "True") == "True"
 ALLOWED_HOSTS = [h.strip() for h in os.getenv("DJANGO_ALLOWED_HOSTS", "").split(",") if h.strip()]
@@ -69,20 +80,30 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "traffic_system.wsgi.application"
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.getenv("DB_NAME", "traffic_system"),
-        "USER": os.getenv("DB_USER", "postgres"),
-        "PASSWORD": os.getenv("DB_PASSWORD", "postgres"),
-        "HOST": os.getenv("DB_HOST", "localhost"),
-        "PORT": os.getenv("DB_PORT", "5432"),
-        "OPTIONS": {
-            # Neon (and most hosted Postgres) requires SSL.
-            "sslmode": os.getenv("DB_SSLMODE", "prefer"),
-        },
+# Local dev without Postgres: set DJANGO_USE_SQLITE=1 in .env (uses backend/db.sqlite3).
+_use_sqlite = os.getenv("DJANGO_USE_SQLITE", "").strip().lower() in ("1", "true", "yes")
+if _use_sqlite:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": _env_strip_quotes(os.getenv("DB_NAME", "traffic_system")),
+            "USER": _env_strip_quotes(os.getenv("DB_USER", "postgres")),
+            "PASSWORD": _env_strip_quotes(os.getenv("DB_PASSWORD", "postgres")),
+            "HOST": _env_strip_quotes(os.getenv("DB_HOST", "localhost")),
+            "PORT": _env_strip_quotes(os.getenv("DB_PORT", "5432")) or "5432",
+            "OPTIONS": {
+                # Neon (and most hosted Postgres) requires SSL.
+                "sslmode": os.getenv("DB_SSLMODE", "prefer"),
+            },
+        }
+    }
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
