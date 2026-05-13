@@ -17,6 +17,8 @@ class TrafficViolationSerializer(serializers.ModelSerializer):
             "severity",
             "evidence_photo_url",
             "location",
+            "latitude",
+            "longitude",
             "status",
             "date",
         ]
@@ -114,6 +116,8 @@ class TrafficViolationDetailSerializer(serializers.ModelSerializer):
             "severity",
             "evidence_photo_url",
             "location",
+            "latitude",
+            "longitude",
             "status",
             "date",
             "fine",

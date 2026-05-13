@@ -29,6 +29,8 @@ class TrafficViolation(models.Model):
     severity = models.CharField(max_length=20, choices=SEVERITY_CHOICES, default="medium")
     evidence_photo_url = models.URLField(blank=True)
     location = models.CharField(max_length=255, blank=True)
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
     date = models.DateTimeField(auto_now_add=True)
 
