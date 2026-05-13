@@ -19,6 +19,29 @@ def _env_strip_quotes(value: str | None) -> str:
     return s
 
 
+def _cors_origin_from_url(url: str) -> str | None:
+    """Return scheme://host[:port] for CORS, or None if not a usable absolute URL."""
+    from urllib.parse import urlparse
+
+    raw = (url or "").strip().rstrip("/")
+    if not raw.startswith(("http://", "https://")):
+        return None
+    p = urlparse(raw)
+    if not p.scheme or not p.netloc:
+        return None
+    return f"{p.scheme}://{p.netloc}"
+
+
+def _merge_cors_origins(origins: list[str], url_blob: str) -> None:
+    """Append unique origins parsed from comma/semicolon-separated URLs (or full origins)."""
+    if not (url_blob or "").strip():
+        return
+    for part in url_blob.replace(";", ",").split(","):
+        o = _cors_origin_from_url(part.strip())
+        if o and o not in origins:
+            origins.append(o)
+
+
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "change-me")
 DEBUG = os.getenv("DJANGO_DEBUG", "True") == "True"
 ALLOWED_HOSTS = [h.strip() for h in os.getenv("DJANGO_ALLOWED_HOSTS", "").split(",") if h.strip()]
@@ -168,6 +191,10 @@ CORS_ALLOWED_ORIGINS = [
     for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
     if origin.strip()
 ]
+
+# Production: browsers send Origin: https://your-spa-host — include it here or rely on PUBLIC_APP_URL.
+_merge_cors_origins(CORS_ALLOWED_ORIGINS, PUBLIC_APP_URL)
+_merge_cors_origins(CORS_ALLOWED_ORIGINS, os.getenv("CORS_EXTRA_ORIGINS", ""))
 
 # Required for axios `withCredentials: true` (refresh cookie / auth flows).
 CORS_ALLOW_CREDENTIALS = True

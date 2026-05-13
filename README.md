@@ -82,6 +82,12 @@ A [.vscode/tasks.json](.vscode/tasks.json) is provided with three tasks:
 
 Press `Ctrl+Shift+B` to launch the full stack.
 
+## Production (Render) — CORS
+
+Set **`PUBLIC_APP_URL`** on the API service to your live SPA (e.g. `https://app.camtraffic.store`, no trailing slash). That value is used for password-reset links **and** is merged into **`CORS_ALLOWED_ORIGINS`**, so flows like `/reset-password` calling the API from the browser work.
+
+If you use **more than one** front-end origin (e.g. separate admin URL), add them as comma-separated **`CORS_ALLOWED_ORIGINS`** and/or **`CORS_EXTRA_ORIGINS`** in the Render dashboard.
+
 ## Docker
 
 Use `docker-compose.yml` to start database, backend, and frontend services.
