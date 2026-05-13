@@ -122,9 +122,8 @@ export async function updateProfile(payload) {
 export async function uploadAvatar(file) {
   const form = new FormData();
   form.append("avatar", file);
-  const { data } = await api.post("auth/avatar/", form, {
-    headers: { "Content-Type": "multipart/form-data" },
-  });
+  // Let axios set Content-Type with boundary (manual "multipart/form-data" breaks uploads).
+  const { data } = await api.post("auth/avatar/", form);
   return data; // returns updated user with avatar_url
 }
 

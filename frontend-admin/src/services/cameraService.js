@@ -25,7 +25,7 @@ export const deleteSignal  = (id)          => api.delete(`${BASE}signals/${id}/`
 
 /* ── Traffic Signs ── */
 export const listSigns     = (params = {}) => api.get(`${BASE}signs/`, { params }).then(r => r.data);
-export const createSign    = (data)        => api.post(`${BASE}signs/`, data, data instanceof FormData ? { headers: { "Content-Type": "multipart/form-data" } } : {}).then(r => r.data);
-export const updateSign    = (id, data)    => api.put(`${BASE}signs/${id}/`, data, data instanceof FormData ? { headers: { "Content-Type": "multipart/form-data" } } : {}).then(r => r.data);
-export const patchSign     = (id, data)    => api.patch(`${BASE}signs/${id}/`, data, data instanceof FormData ? { headers: { "Content-Type": "multipart/form-data" } } : {}).then(r => r.data);
+export const createSign    = (data)        => api.post(`${BASE}signs/`, data).then(r => r.data);
+export const updateSign    = (id, data)    => api.put(`${BASE}signs/${id}/`, data).then(r => r.data);
+export const patchSign     = (id, data)    => api.patch(`${BASE}signs/${id}/`, data).then(r => r.data);
 export const deleteSign    = (id)          => api.delete(`${BASE}signs/${id}/`);

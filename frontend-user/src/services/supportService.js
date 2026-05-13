@@ -3,12 +3,8 @@ import api from "./api.js";
 const BASE = "support/reports/";
 
 /** Submit a new issue report (accepts FormData or plain object) */
-export const createIssueReport = (data) => {
-  const isForm = data instanceof FormData;
-  return api
-    .post(`${BASE}create/`, data, isForm ? { headers: { "Content-Type": "multipart/form-data" } } : {})
-    .then((r) => r.data);
-};
+export const createIssueReport = (data) =>
+  api.post(`${BASE}create/`, data).then((r) => r.data);
 
 /** List issue reports (admin sees all, user sees their own) */
 export const listIssueReports = (params = {}) =>

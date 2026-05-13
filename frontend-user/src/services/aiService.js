@@ -1,16 +1,12 @@
 import api from "./api.js";
 
 export async function processImage(formData) {
-  const { data } = await api.post("ai/process-image/", formData, {
-    headers: { "Content-Type": "multipart/form-data" }
-  });
+  const { data } = await api.post("ai/process-image/", formData);
   return data;
 }
 
 export async function uploadVideo(formData) {
-  const { data } = await api.post("ai/upload-video/", formData, {
-    headers: { "Content-Type": "multipart/form-data" }
-  });
+  const { data } = await api.post("ai/upload-video/", formData);
   return data;
 }
 
