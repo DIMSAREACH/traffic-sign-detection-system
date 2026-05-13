@@ -332,6 +332,11 @@ api.interceptors.response.use(
         return Promise.reject(error);
       }
 
+      // Wrong password / unknown user on login — never try JWT refresh (would hide the real error).
+      if (isPublicAuthPath(originalRequest.url || "")) {
+        return Promise.reject(error);
+      }
+
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });

@@ -1,5 +1,6 @@
 from django.contrib.auth import authenticate
 from rest_framework import serializers
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import Driver, Officer, Permission, Role, RolePermission, User, UserRole  # noqa: F401
@@ -201,20 +202,20 @@ class LoginSerializer(serializers.Serializer):
         # Check if user exists first — gives a clearer error (match EmailBackend: case-insensitive).
         from .models import User as UserModel
         if not UserModel.objects.filter(email__iexact=email).exists():
-            raise serializers.ValidationError("No account found with this email address.")
+            raise AuthenticationFailed("No account found with this email address.")
 
         user = authenticate(email=email, password=password)
         if not user:
-            raise serializers.ValidationError("Incorrect password. Please try again.")
+            raise AuthenticationFailed("Incorrect password. Please try again.")
 
         if not user.is_active:
-            raise serializers.ValidationError("This account has been deactivated.")
+            raise AuthenticationFailed("This account has been deactivated.")
 
         # If a role tab was selected, verify the user actually has that role
         requested_role = attrs.get("role", "").strip().lower()
         if requested_role:
             if not user.has_role(requested_role):
-                raise serializers.ValidationError(
+                raise AuthenticationFailed(
                     f"This account does not have the '{requested_role}' role."
                 )
 
