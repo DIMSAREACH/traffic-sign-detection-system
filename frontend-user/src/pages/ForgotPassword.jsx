@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
-import { otpRequest } from "../services/authService.js";
+import { formatApiError, otpRequest } from "../services/authService.js";
 import "./Login.css";
 
 function formatLinkExpiry(seconds) {
@@ -45,9 +45,7 @@ export default function ForgotPassword() {
       );
       setStep("sent");
     } catch (err) {
-      setServerError(
-        err?.response?.data?.detail ?? "Something went wrong. Please try again."
-      );
+      setServerError(formatApiError(err, "Something went wrong. Please try again."));
     } finally {
       setLoading(false);
     }

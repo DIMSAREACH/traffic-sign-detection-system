@@ -303,7 +303,7 @@ class PasswordResetConfirmView(APIView):
         try:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
-            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"detail": "User not found."}, status=status.HTTP_400_BAD_REQUEST)
 
         pw_err = validate_strong_password(new_password)
         if pw_err:
@@ -1055,7 +1055,7 @@ class OTPRequestView(APIView):
         if not user:
             return Response(
                 {"detail": "No account found with this email or username."},
-                status=status.HTTP_404_NOT_FOUND,
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         if not user.is_active:
@@ -1156,7 +1156,7 @@ class OTPVerifyView(APIView):
         if not user:
             return Response(
                 {"detail": "No account found with this email or username."},
-                status=status.HTTP_404_NOT_FOUND,
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         # Latest unused PASSWORD_RESET OTP
@@ -1226,7 +1226,7 @@ class PasswordResetOTPView(APIView):
         try:
             user = _User.objects.get(pk=user_id)
         except _User.DoesNotExist:
-            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"detail": "User not found."}, status=status.HTTP_400_BAD_REQUEST)
 
         if new_password != confirm_password:
             return Response({"detail": "Passwords do not match."}, status=status.HTTP_400_BAD_REQUEST)
