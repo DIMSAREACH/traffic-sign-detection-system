@@ -115,6 +115,11 @@ export default function Profile() {
   const [avErr, setAvErr] = useState("");
   const [avatarHover, setAvatarHover] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
+
+  useEffect(() => {
+    setAvatarLoadFailed(false);
+  }, [user?.id, user?.avatar_url, preview]);
 
   const processFile = (file) => {
     if (!file) return;
@@ -540,10 +545,11 @@ export default function Profile() {
               >
                 <div className="prof-avatar-border" />
                 <div className="prof-avatar-inner">
-                  {(preview || user?.avatar_url) ? (
+                  {(preview || user?.avatar_url) && !avatarLoadFailed ? (
                     <img
                       src={preview || user.avatar_url}
-                      alt="Profile"
+                      alt=""
+                      onError={() => setAvatarLoadFailed(true)}
                       style={{ opacity: uploadingAv ? 0.35 : (avatarHover ? 0.6 : 1) }}
                     />
                   ) : (

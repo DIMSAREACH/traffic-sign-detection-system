@@ -33,6 +33,9 @@ if _APPEND_LOCAL_VITE_CORS:
         if h not in ALLOWED_HOSTS:
             ALLOWED_HOSTS.append(h)
 
+# Expose /media/ on runserver when DEBUG, or local Vite + DEBUG=False (avatars & uploads otherwise 404).
+SERVE_MEDIA_LOCALLY = DEBUG or _APPEND_LOCAL_VITE_CORS
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",

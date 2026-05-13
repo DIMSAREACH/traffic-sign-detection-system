@@ -38,5 +38,5 @@ urlpatterns = [
     path("api/support/", include("support.urls")),
 ]
 
-if settings.DEBUG:
+if getattr(settings, "SERVE_MEDIA_LOCALLY", settings.DEBUG):
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
