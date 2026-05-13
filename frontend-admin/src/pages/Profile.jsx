@@ -7,6 +7,7 @@ import {
   confirmBackupEmail,
   confirmEmailChange,
   deleteAccount,
+  formatApiError,
   removeBackupEmail,
   requestBackupEmail,
   requestEmailChange,
@@ -139,8 +140,8 @@ export default function Profile() {
         updateUser(updated);
         setPreview(null);
       })
-      .catch(() => {
-        setAvErr(t("prof.avatarUploadErr"));
+      .catch((e) => {
+        setAvErr(formatApiError(e, t("prof.avatarUploadErr")));
         setPreview(null);
       })
       .finally(() => setUploadingAv(false));

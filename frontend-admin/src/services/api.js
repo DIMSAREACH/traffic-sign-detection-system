@@ -83,6 +83,7 @@ function isPublicAuthPath(url = "") {
   const normalizedUrl = String(url).replace(/^\/+/, "");
   return [
     "auth/login",
+    "auth/logout",
     "auth/register",
     "auth/password-reset",
     "auth/social",

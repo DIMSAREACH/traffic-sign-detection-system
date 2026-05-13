@@ -13,6 +13,7 @@ from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 from rest_framework import generics, permissions, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -160,6 +161,19 @@ class LoginView(APIView):
         return Response(serializer.validated_data, status=status.HTTP_200_OK)
 
 
+class LogoutView(APIView):
+    """
+    Acknowledge logout. The SPA clears JWT from storage; there is no Django session.
+    POST only so accidental GETs do not clear client state.
+    """
+
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = []
+
+    def post(self, request):
+        return Response({"detail": "Successfully logged out."})
+
+
 class ProfileView(APIView):
     def get(self, request):
         return Response(UserSerializer(request.user, context={"request": request}).data)
@@ -175,6 +189,9 @@ class ProfileView(APIView):
 
 class AvatarUploadView(APIView):
     """POST multipart/form-data  { avatar: <file> }"""
+
+    parser_classes = [MultiPartParser, FormParser]
+    permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
         user = request.user
